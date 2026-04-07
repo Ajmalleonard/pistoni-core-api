@@ -1,0 +1,365 @@
+generator db {
+  provider = "go run github.com/steebchen/prisma-client-go"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Keep this schema in sync with ../prisma/schema.prisma
+// For now, mirror all models so Go service can progressively replace NestJS modules.
+
+enum UserRole {
+  ADMIN
+  CAR_OWNER
+  DRIVER
+  BODY_GUARD
+  CLIENT
+}
+
+enum AuthProvider {
+  EMAIL
+  GOOGLE
+  APPLE
+}
+
+enum CarStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  MAINTENANCE
+  AVAILABLE
+  RENTED
+}
+
+enum RentalStatus {
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum VehicleType {
+  SUV
+  COASTER
+  LONG_VEHICLE
+}
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+enum ProviderVerificationStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+model User {
+  id                String       @id @default(uuid())
+  email             String       @unique
+  password          String?
+  name              String
+  phoneNumber       String?
+  role              UserRole     @default(CLIENT)
+  profilePicture    String?
+  isVerified        Boolean      @default(false)
+  authProvider      AuthProvider @default(EMAIL)
+  verificationToken String?
+  tokenExpiry       DateTime?
+  verificationCode  String?
+  codeType          String?
+  codeExpiry        DateTime?
+  refreshToken      String?
+  refreshTokenExpiry DateTime?
+  status            String?      @default("OFFLINE")
+  lastSeen          DateTime?    @default(now())
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  carsOwned             Car[]                 @relation("CarOwner")
+  rentals               Rental[]              @relation("RentalUser")
+  reviews               Review[]              @relation("ReviewAuthor")
+  receivedReviews       Review[]              @relation("ReviewTarget")
+  messages              Message[]
+  chatRoomParticipants  ChatRoomParticipant[]
+  notifications         Notification[]
+  paymentMethods        PaymentMethod[]
+  driverProfile         DriverProfile?
+  bodyGuardProfile      BodyGuardProfile?
+}
+
+model PendingEmailVerification {
+  id         String   @id @default(uuid())
+  email      String   @unique
+  code       String
+  codeExpiry DateTime
+  createdAt  DateTime @default(now())
+}
+
+model Car {
+  id               String    @id @default(uuid())
+  make             String
+  model            String
+  year             Int
+  color            String
+  licensePlate     String    @unique
+  price            Float
+  images           String[]
+  description      String?
+  status           CarStatus @default(PENDING_REVIEW)
+  features         String[]
+  seatCount        Int
+  transmissionType String
+  fuelType         String
+  vehicleType      VehicleType @default(COASTER)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  ownerId  String
+  owner    User      @relation("CarOwner", fields: [ownerId], references: [id])
+  rentals  Rental[]
+  reviews  Review[]
+  location Location?
+}
+
+model Location {
+  id        String   @id @default(uuid())
+  latitude  Float
+  longitude Float
+  address   String
+  city      String
+  state     String?
+  country   String
+  zipCode   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  carId    String   @unique
+  car      Car      @relation(fields: [carId], references: [id])
+  rentals  Rental[] @relation("PickupLocation")
+  dropoffs Rental[] @relation("DropoffLocation")
+}
+
+model Rental {
+  id         String       @id @default(uuid())
+  startDate  DateTime
+  endDate    DateTime
+  totalPrice Float
+  status     RentalStatus @default(PENDING)
+  distanceKm Float?
+  driverRequired Boolean  @default(false)
+  securityRequired Boolean @default(false)
+  securityNotes String?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  userId            String
+  user              User     @relation("RentalUser", fields: [userId], references: [id])
+  carId             String
+  car               Car      @relation(fields: [carId], references: [id])
+  pickupLocationId  String
+  pickupLocation    Location @relation("PickupLocation", fields: [pickupLocationId], references: [id])
+  dropoffLocationId String
+  dropoffLocation   Location @relation("DropoffLocation", fields: [dropoffLocationId], references: [id])
+  driverId          String?
+  driver            DriverProfile? @relation("AssignedDriver", fields: [driverId], references: [id])
+  bodyGuards        RentalBodyGuard[]
+  review            Review?
+}
+
+model DriverProfile {
+  id                       String                     @id @default(uuid())
+  userId                   String                     @unique
+  pistoniIdNumber          String                     @unique
+  gender                   Gender?
+  dateOfBirth              DateTime?
+  address                  String?
+  nin                      String?                    @unique
+  driversLicenseNumber     String                     @unique
+  driversLicenseClass      String?
+  driversLicenseExpiry     DateTime?
+  issuingAuthority         String?
+  yearsOfExperience        Int?
+  emergencyContactName     String?
+  emergencyContactPhone    String?
+  dailyRate                Float
+  verificationStatus       ProviderVerificationStatus @default(PENDING_REVIEW)
+  isAvailable              Boolean                    @default(true)
+  backgroundCheckCompleted Boolean                    @default(false)
+  notes                    String?
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedRentals Rental[] @relation("AssignedDriver")
+
+  @@index([verificationStatus, isAvailable])
+}
+
+model BodyGuardProfile {
+  id                       String                     @id @default(uuid())
+  userId                   String                     @unique
+  pistoniIdNumber          String                     @unique
+  gender                   Gender
+  dateOfBirth              DateTime?
+  address                  String?
+  nin                      String                     @unique
+  governmentIdNumber       String                     @unique
+  securityLicenseNumber    String?                    @unique
+  securityLicenseExpiry    DateTime?
+  issuingAuthority         String?
+  yearsOfExperience        Int?
+  emergencyContactName     String?
+  emergencyContactPhone    String?
+  dailyRate                Float
+  verificationStatus       ProviderVerificationStatus @default(PENDING_REVIEW)
+  isAvailable              Boolean                    @default(true)
+  backgroundCheckCompleted Boolean                    @default(false)
+  notes                    String?
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+
+  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedBodyGuards RentalBodyGuard[]
+
+  @@index([gender, verificationStatus, isAvailable])
+}
+
+model RentalBodyGuard {
+  id          String           @id @default(uuid())
+  rentalId    String
+  bodyGuardId String
+  createdAt   DateTime         @default(now())
+
+  rental    Rental           @relation(fields: [rentalId], references: [id], onDelete: Cascade)
+  bodyGuard BodyGuardProfile @relation(fields: [bodyGuardId], references: [id], onDelete: Restrict)
+
+  @@unique([rentalId, bodyGuardId])
+  @@index([bodyGuardId])
+}
+
+model Review {
+  id        String   @id @default(uuid())
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  authorId String
+  author   User    @relation("ReviewAuthor", fields: [authorId], references: [id])
+  targetId String?
+  target   User?   @relation("ReviewTarget", fields: [targetId], references: [id])
+  carId    String?
+  car      Car?    @relation(fields: [carId], references: [id])
+  rentalId String? @unique
+  rental   Rental? @relation(fields: [rentalId], references: [id])
+}
+
+model ChatRoom {
+  id            String   @id @default(uuid())
+  name          String?
+  type          String   @default("PRIVATE")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  lastMessageId String?
+
+  participants ChatRoomParticipant[]
+  messages     Message[]
+  lastMessage  Message?  @relation("LastMessage", fields: [lastMessageId], references: [id], onDelete: SetNull)
+}
+
+model ChatRoomParticipant {
+  id         String   @id @default(uuid())
+  chatRoomId String
+  userId     String
+  role       String   @default("MEMBER")
+  joinedAt   DateTime @default(now())
+  
+  chatRoom ChatRoom @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([chatRoomId, userId])
+}
+
+model Message {
+  id         String    @id @default(uuid())
+  chatRoomId String
+  senderId   String
+  content    String
+  timestamp  DateTime  @default(now())
+  isRead     Boolean   @default(false)
+  isDeleted  Boolean   @default(false)
+  edited     Boolean   @default(false)
+  
+  chatRoom   ChatRoom  @relation(fields: [chatRoomId], references: [id], onDelete: Cascade)
+  sender     User      @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  lastMessageInRoom ChatRoom[] @relation("LastMessage")
+}
+
+enum NotificationType {
+  CHAT
+  RENTAL
+  PAYMENT
+  SYSTEM
+  PROMOTION
+}
+
+enum PaymentMethodType {
+  CARD
+  MOBILE_MONEY
+}
+
+enum PaymentMethodStatus {
+  ACTIVE
+  INACTIVE
+  DEFAULT
+}
+
+model Notification {
+  id              String           @id @default(uuid())
+  userId          String
+  title           String
+  body            String
+  type            NotificationType
+  relatedEntityId String?
+  isRead          Boolean          @default(false)
+  imageUrl        String?
+  actionUrl       String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+}
+
+model PaymentMethod {
+  id          String              @id @default(uuid())
+  userId      String
+  type        PaymentMethodType
+  status      PaymentMethodStatus @default(ACTIVE)
+  isDefault   Boolean             @default(false)
+  cardNumber  String?
+  cardType    String?
+  expiryMonth Int?
+  expiryYear  Int?
+  cardholderName String?
+  mobileNumber String?
+  provider    String?
+  accountName String?
+  encryptedData String?
+  token       String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([userId, isDefault])
+}

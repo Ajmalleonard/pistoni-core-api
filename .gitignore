@@ -1,0 +1,57 @@
+# If you prefer the allow list repository design pattern, optimized for Go,
+# read this blog post: https://medium.com/@jessicagreben/how-to-setup-a-go-git-repository-6320b98a0871
+
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with Litmus
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Env files
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+.env.staging
+.env.preview
+.env.*.local
+.env.*.development
+.env.*.production
+.env.*.test
+.env.*.staging
+.env.*.preview
+
+# IDE-specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist/
+bin/
+docs/
+# Local temp artifacts
+.tmp/
+
+# Local temp artifacts
+.tmp/
