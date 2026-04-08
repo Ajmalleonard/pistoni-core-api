@@ -229,14 +229,14 @@ func (s *Service) ChangePassword(userID, currentPassword, newPassword string) er
 }
 
 func (s *Service) GoogleOAuth(in dto.GoogleOAuthDTO) (AuthResponse, error) {
-	clientID := os.Getenv("GOOGLE_CLIENT_ID")
-	if clientID == "" {
+	clientIDs := googleClientIDsFromEnv()
+	if len(clientIDs) == 0 {
 		return AuthResponse{}, apperr.New(http.StatusUnauthorized, "Google OAuth not configured")
 	}
 
-	payload, err := idtoken.Validate(context.Background(), in.IDToken, clientID)
+	payload, err := validateGoogleIDToken(in.IDToken, clientIDs)
 	if err != nil {
-		return AuthResponse{}, apperr.New(http.StatusUnauthorized, "Invalid Google token")
+		return AuthResponse{}, apperr.New(http.StatusUnauthorized, fmt.Sprintf("Invalid Google token: %v", err))
 	}
 
 	emailClaim, _ := payload.Claims["email"].(string)
@@ -389,6 +389,40 @@ func parseAppleIdentityTokenClaims(identityToken string) (appleIdentityTokenClai
 		return appleIdentityTokenClaims{}, err
 	}
 	return claims, nil
+}
+
+func googleClientIDsFromEnv() []string {
+	raw := strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_IDS"))
+	if raw == "" {
+		raw = strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID"))
+	}
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		v := strings.TrimSpace(p)
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func validateGoogleIDToken(idTokenRaw string, audiences []string) (*idtoken.Payload, error) {
+	var lastErr error
+	for _, aud := range audiences {
+		payload, err := idtoken.Validate(context.Background(), idTokenRaw, aud)
+		if err == nil {
+			return payload, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no audience configured")
+	}
+	return nil, lastErr
 }
 
 func ptr[T any](v T) *T { return &v }
