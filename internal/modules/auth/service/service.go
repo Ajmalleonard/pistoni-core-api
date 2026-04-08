@@ -1,15 +1,20 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+	"google.golang.org/api/idtoken"
 	"pistoni/core/internal/modules/auth/dto"
 	authrepo "pistoni/core/internal/modules/auth/repo"
 	usersrepo "pistoni/core/internal/modules/users/repo"
@@ -224,7 +229,21 @@ func (s *Service) ChangePassword(userID, currentPassword, newPassword string) er
 }
 
 func (s *Service) GoogleOAuth(in dto.GoogleOAuthDTO) (AuthResponse, error) {
-	// TODO(prisma): Verify Google ID token via google-auth library in dedicated adapter.
+	clientID := os.Getenv("GOOGLE_CLIENT_ID")
+	if clientID == "" {
+		return AuthResponse{}, apperr.New(http.StatusUnauthorized, "Google OAuth not configured")
+	}
+
+	payload, err := idtoken.Validate(context.Background(), in.IDToken, clientID)
+	if err != nil {
+		return AuthResponse{}, apperr.New(http.StatusUnauthorized, "Invalid Google token")
+	}
+
+	emailClaim, _ := payload.Claims["email"].(string)
+	if emailClaim == "" || !strings.EqualFold(emailClaim, in.Email) {
+		return AuthResponse{}, apperr.New(http.StatusUnauthorized, "Token email does not match provided email")
+	}
+
 	u, err := s.users.FindByEmail(in.Email)
 	if err != nil {
 		u = model.User{Email: in.Email, Name: in.Name, AuthProvider: model.AuthProviderGoogle, IsVerified: true, Role: model.UserRoleClient}
@@ -236,7 +255,11 @@ func (s *Service) GoogleOAuth(in dto.GoogleOAuthDTO) (AuthResponse, error) {
 			return AuthResponse{}, err
 		}
 	} else {
-		_, err = s.users.Update(u.ID, map[string]any{"authProvider": string(model.AuthProviderGoogle), "isVerified": true})
+		patch := map[string]any{"authProvider": string(model.AuthProviderGoogle), "isVerified": true}
+		if in.ProfilePicture != "" {
+			patch["profilePicture"] = in.ProfilePicture
+		}
+		_, err = s.users.Update(u.ID, patch)
 		if err != nil {
 			return AuthResponse{}, err
 		}
@@ -249,27 +272,72 @@ func (s *Service) AppleOAuth(in dto.AppleOAuthDTO) (AuthResponse, error) {
 	if in.IdentityToken == "" || in.UserIdentifier == "" {
 		return AuthResponse{}, apperr.New(http.StatusUnauthorized, "Invalid Apple Sign-In data")
 	}
-	email := in.Email
-	if email == "" {
-		return AuthResponse{}, apperr.New(http.StatusUnauthorized, "Unable to authenticate: email required for new Apple Sign-In users")
-	}
-	u, err := s.users.FindByEmail(email)
+
+	claims, err := parseAppleIdentityTokenClaims(in.IdentityToken)
 	if err != nil {
-		name := strings.TrimSpace(in.FullName.GivenName + " " + in.FullName.FamilyName)
-		if name == "" {
-			name = strings.Split(email, "@")[0]
+		return AuthResponse{}, apperr.New(http.StatusUnauthorized, "Invalid Apple identity token")
+	}
+
+	if claims.Iss != "https://appleid.apple.com" {
+		return AuthResponse{}, apperr.New(http.StatusUnauthorized, "Invalid Apple token issuer")
+	}
+	if claims.Sub == "" || claims.Sub != in.UserIdentifier {
+		return AuthResponse{}, apperr.New(http.StatusUnauthorized, "Invalid Apple user identifier")
+	}
+	if appleClientID := os.Getenv("APPLE_CLIENT_ID"); appleClientID != "" && claims.Aud != "" && claims.Aud != appleClientID {
+		return AuthResponse{}, apperr.New(http.StatusUnauthorized, "Invalid Apple token audience")
+	}
+	if claims.Exp <= time.Now().Unix() {
+		return AuthResponse{}, apperr.New(http.StatusUnauthorized, "Expired Apple identity token")
+	}
+
+	email := strings.TrimSpace(in.Email)
+	if email == "" {
+		email = strings.TrimSpace(claims.Email)
+	}
+
+	// First lookup by stored Apple userIdentifier (kept in verificationToken for parity with old NestJS behavior).
+	users, _ := s.users.FindAll(0, 0, nil)
+	var existing *model.User
+	for _, candidate := range users {
+		if candidate.AuthProvider == model.AuthProviderApple && candidate.VerificationToken != nil && *candidate.VerificationToken == in.UserIdentifier {
+			c := candidate
+			existing = &c
+			break
 		}
-		u = model.User{Email: email, Name: name, AuthProvider: model.AuthProviderApple, IsVerified: true, Role: model.UserRoleClient, VerificationToken: &in.UserIdentifier}
-		u, err = s.users.Create(u)
+	}
+
+	if existing == nil {
+		if email == "" {
+			return AuthResponse{}, apperr.New(http.StatusUnauthorized, "Unable to authenticate: email required for new Apple Sign-In users")
+		}
+		u, err := s.users.FindByEmail(email)
+		if err == nil {
+			existing = &u
+		}
+	}
+
+	if existing != nil {
+		patch := map[string]any{"authProvider": string(model.AuthProviderApple), "isVerified": true, "verificationToken": &in.UserIdentifier}
+		_, err = s.users.Update(existing.ID, patch)
 		if err != nil {
 			return AuthResponse{}, err
 		}
-	} else {
-		_, err = s.users.Update(u.ID, map[string]any{"authProvider": string(model.AuthProviderApple), "isVerified": true, "verificationToken": &in.UserIdentifier})
-		if err != nil {
-			return AuthResponse{}, err
-		}
-		u, _ = s.users.FindByID(u.ID)
+		u, _ := s.users.FindByID(existing.ID)
+		return s.issueTokens(u)
+	}
+
+	if email == "" {
+		return AuthResponse{}, apperr.New(http.StatusUnauthorized, "Email is required for new Apple Sign-In users")
+	}
+	name := strings.TrimSpace(in.FullName.GivenName + " " + in.FullName.FamilyName)
+	if name == "" {
+		name = strings.Split(email, "@")[0]
+	}
+	u := model.User{Email: email, Name: name, AuthProvider: model.AuthProviderApple, IsVerified: true, Role: model.UserRoleClient, VerificationToken: &in.UserIdentifier}
+	u, err = s.users.Create(u)
+	if err != nil {
+		return AuthResponse{}, err
 	}
 	return s.issueTokens(u)
 }
@@ -296,6 +364,31 @@ func randomToken(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+type appleIdentityTokenClaims struct {
+	Iss   string `json:"iss"`
+	Aud   string `json:"aud"`
+	Exp   int64  `json:"exp"`
+	Iat   int64  `json:"iat"`
+	Sub   string `json:"sub"`
+	Email string `json:"email"`
+}
+
+func parseAppleIdentityTokenClaims(identityToken string) (appleIdentityTokenClaims, error) {
+	parts := strings.Split(identityToken, ".")
+	if len(parts) != 3 {
+		return appleIdentityTokenClaims{}, fmt.Errorf("invalid jwt format")
+	}
+	payloadRaw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return appleIdentityTokenClaims{}, err
+	}
+	var claims appleIdentityTokenClaims
+	if err := json.Unmarshal(payloadRaw, &claims); err != nil {
+		return appleIdentityTokenClaims{}, err
+	}
+	return claims, nil
 }
 
 func ptr[T any](v T) *T { return &v }
