@@ -1,0 +1,75 @@
+name: pistoni-core-api deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to deploy (branch/tag/sha)"
+        required: false
+        default: "main"
+
+env:
+  GO_VERSION: "1.24.2"
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref_name }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Go test
+        run: go test ./...
+
+      - name: Build
+        run: go build -buildvcs=false -o pistoni-core-api ./cmd/api
+
+  deploy-vps:
+    needs: test-and-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          port: ${{ secrets.VPS_PORT }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script_stop: true
+          command_timeout: 30m
+          script: |
+            set -euo pipefail
+
+            APP_DIR=/home/apps/sq/pistoni-core-api
+            BRANCH=${{ github.event.inputs.ref || 'main' }}
+
+            cd "$APP_DIR"
+            git fetch --all --prune
+            git checkout "$BRANCH"
+            git pull --ff-only origin "$BRANCH"
+
+            /usr/local/go/bin/go version
+            /usr/local/go/bin/go test ./...
+            /usr/local/go/bin/go build -buildvcs=false -o /usr/local/bin/pistoni-core-api ./cmd/api
+
+            systemctl restart pistoni-core-api
+            sleep 3
+            systemctl is-active --quiet pistoni-core-api
+            curl -fsS --max-time 10 http://127.0.0.1:1012/health
+
+      - name: Post-deploy summary
+        run: |
+          echo "✅ Deploy completed for ref: ${{ github.event.inputs.ref || github.ref_name }}"
+          echo "Remember to keep these repo secrets configured: VPS_HOST, VPS_PORT, VPS_USER, VPS_SSH_KEY"
