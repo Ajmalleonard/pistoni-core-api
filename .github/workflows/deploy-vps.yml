@@ -122,3 +122,35 @@ jobs:
           to: ${{ secrets.CI_NOTIFY_EMAILS }}
           from: ${{ secrets.CI_SMTP_USER }}
           body: ${{ steps.compose.outputs.body }}
+
+      - name: Send WhatsApp notification
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          WA_TOKEN: ${{ secrets.WA_TOKEN }}
+          WA_PHONE_NUMBER_ID: ${{ secrets.WA_PHONE_NUMBER_ID }}
+          WA_TO: ${{ secrets.WA_TO }}
+          SUBJECT: ${{ steps.compose.outputs.subject }}
+          BODY: ${{ steps.compose.outputs.body }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          url = f"https://graph.facebook.com/v22.0/{os.environ['WA_PHONE_NUMBER_ID']}/messages"
+          payload = {
+              "messaging_product": "whatsapp",
+              "to": os.environ["WA_TO"],
+              "type": "text",
+              "text": {"body": f"{os.environ['SUBJECT']}\n\n{os.environ['BODY']}"}
+          }
+          req = urllib.request.Request(
+              url,
+              data=json.dumps(payload).encode(),
+              method="POST",
+              headers={
+                  "Authorization": f"Bearer {os.environ['WA_TOKEN']}",
+                  "Content-Type": "application/json",
+              },
+          )
+          with urllib.request.urlopen(req, timeout=20) as r:
+              print(r.read().decode())
+          PY
