@@ -120,5 +120,5 @@ jobs:
           secure: true
           subject: ${{ steps.compose.outputs.subject }}
           to: ${{ secrets.CI_NOTIFY_EMAILS }}
-          from: ${{ secrets.CI_NOTIFY_FROM }}
+          from: ${{ secrets.CI_SMTP_USER }}
           body: ${{ steps.compose.outputs.body }}
