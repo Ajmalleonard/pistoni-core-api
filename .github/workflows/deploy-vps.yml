@@ -74,3 +74,51 @@ jobs:
         run: |
           echo "✅ Deploy completed for ref: ${{ github.event.inputs.ref || github.ref_name }}"
           echo "Remember to keep these repo secrets configured: VPS_HOST, VPS_PORT, VPS_USER, VPS_SSH_KEY"
+
+  notify-email:
+    if: ${{ always() }}
+    needs: [test-and-build, deploy-vps]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compose notification
+        id: compose
+        run: |
+          REF="${{ github.event.inputs.ref || github.ref_name }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          TB="${{ needs.test-and-build.result }}"
+          DV="${{ needs.deploy-vps.result }}"
+
+          if [ "$TB" = "success" ] && [ "$DV" = "success" ]; then
+            STATUS="SUCCESS"
+            REASON="All jobs passed (test-and-build, deploy-vps)."
+          else
+            STATUS="FAILED"
+            REASON="test-and-build=$TB, deploy-vps=$DV"
+          fi
+
+          SUBJECT="[${STATUS}] pistoni-core-api deploy (${REF})"
+          {
+            echo "subject=${SUBJECT}"
+            echo "body<<EOF"
+            echo "Repository: ${{ github.repository }}"
+            echo "Ref: ${REF}"
+            echo "Commit: ${{ github.sha }}"
+            echo "Status: ${STATUS}"
+            echo "Reason: ${REASON}"
+            echo "Run URL: ${RUN_URL}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Send notification email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.CI_SMTP_HOST }}
+          server_port: ${{ secrets.CI_SMTP_PORT }}
+          username: ${{ secrets.CI_SMTP_USER }}
+          password: ${{ secrets.CI_SMTP_PASS }}
+          secure: true
+          subject: ${{ steps.compose.outputs.subject }}
+          to: ${{ secrets.CI_NOTIFY_EMAILS }}
+          from: ${{ secrets.CI_NOTIFY_FROM }}
+          body: ${{ steps.compose.outputs.body }}
