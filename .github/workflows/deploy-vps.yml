@@ -62,11 +62,12 @@ jobs:
 
             /usr/local/go/bin/go version
             /usr/local/go/bin/go test ./...
-            /usr/local/go/bin/go build -buildvcs=false -o /usr/local/bin/pistoni-core-api ./cmd/api
+            /usr/local/go/bin/go build -buildvcs=false -o /tmp/pistoni-core-api ./cmd/api
+            sudo install -m 755 /tmp/pistoni-core-api /usr/local/bin/pistoni-core-api
 
-            systemctl restart pistoni-core-api
+            sudo systemctl restart pistoni-core-api
             sleep 3
-            systemctl is-active --quiet pistoni-core-api
+            sudo systemctl is-active --quiet pistoni-core-api
             curl -fsS --max-time 10 http://127.0.0.1:1012/health
 
       - name: Post-deploy summary
