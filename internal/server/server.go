@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 	"pistoni/core/internal/config"
@@ -52,6 +53,21 @@ func New(cfg config.Config) (*Server, error) {
 	r := gin.New()
 	rateLimiter := guard.NewIPRateLimiter()
 	r.Use(gin.Logger(), gin.Recovery(), rateLimiter.Middleware(2400, 600, 1*time.Minute))
+
+	// CORS middleware
+	r.Use(cors.New(cors.Config{
+		AllowOrigins: []string{
+			"http://localhost:3000",
+			"http://localhost:3001",
+			"https://core.api.pistoni.io",
+			"https://pistoni.io",
+			"https://www.pistoni.io",
+		},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Content-Type", "Authorization", "Accept"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 
 	store := storage.NewMemoryStore()
 	userRepo := usersrepo.NewMemoryRepository(store)
