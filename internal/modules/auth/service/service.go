@@ -21,6 +21,7 @@ import (
 	"pistoni/core/internal/platform/apperr"
 	"pistoni/core/internal/platform/auth"
 	"pistoni/core/internal/platform/model"
+	platformredis "pistoni/core/internal/platform/redis"
 )
 
 type AuthResponse struct {
@@ -46,6 +47,7 @@ type Service struct {
 	pendingRepo authrepo.PendingRepository
 	jwt         *auth.JWTManager
 	emailer     EmailSender
+	cache       *platformredis.JSONCache
 }
 
 func New(users usersrepo.Repository, pending authrepo.PendingRepository, jwt *auth.JWTManager, emailer EmailSender) *Service {
@@ -55,12 +57,27 @@ func New(users usersrepo.Repository, pending authrepo.PendingRepository, jwt *au
 	return &Service{users: users, pendingRepo: pending, jwt: jwt, emailer: emailer}
 }
 
+func (s *Service) WithCache(cache *platformredis.JSONCache) *Service {
+	s.cache = cache
+	return s
+}
+
 func (s *Service) UserForAuth(userID string) (Principal, error) {
+	if s.cache != nil {
+		var cached Principal
+		if ok, err := s.cache.Get(context.Background(), principalCacheKey(userID), &cached); err == nil && ok {
+			return cached, nil
+		}
+	}
 	u, err := s.users.FindByID(userID)
 	if err != nil {
 		return Principal{}, err
 	}
-	return Principal{User: u}, nil
+	principal := Principal{User: u}
+	if s.cache != nil {
+		_ = s.cache.Set(context.Background(), principalCacheKey(userID), principal)
+	}
+	return principal, nil
 }
 
 func (s *Service) Login(in dto.LoginDTO) (AuthResponse, error) {
@@ -123,6 +140,7 @@ func (s *Service) Refresh(refreshToken string) (AuthResponse, error) {
 
 func (s *Service) Logout(userID string) error {
 	_, err := s.users.Update(userID, map[string]any{"refreshToken": (*string)(nil), "refreshTokenExpiry": (*time.Time)(nil)})
+	s.invalidateUserCaches(userID)
 	return err
 }
 
@@ -209,7 +227,12 @@ func (s *Service) UpdateProfile(userID string, in dto.UpdateProfileDTO) (model.U
 	if in.ProfilePicture != nil {
 		patch["profilePicture"] = *in.ProfilePicture
 	}
-	return s.users.Update(userID, patch)
+	updated, err := s.users.Update(userID, patch)
+	if err != nil {
+		return model.User{}, err
+	}
+	s.invalidateUserCaches(userID)
+	return updated, nil
 }
 
 func (s *Service) ChangePassword(userID, currentPassword, newPassword string) error {
@@ -225,6 +248,7 @@ func (s *Service) ChangePassword(userID, currentPassword, newPassword string) er
 	}
 	hash, _ := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	_, err = s.users.Update(userID, map[string]any{"password": ptr(string(hash))})
+	s.invalidateUserCaches(userID)
 	return err
 }
 
@@ -353,7 +377,25 @@ func (s *Service) issueTokens(u model.User) (AuthResponse, error) {
 	if err != nil {
 		return AuthResponse{}, err
 	}
+	s.invalidateUserCaches(u.ID)
 	return AuthResponse{User: updated, AccessToken: access, RefreshToken: refresh}, nil
+}
+
+func (s *Service) invalidateUserCaches(userID string) {
+	if s.cache == nil || userID == "" {
+		return
+	}
+	ctx := context.Background()
+	_ = s.cache.Delete(ctx, principalCacheKey(userID))
+	_ = s.cache.DeletePrefix(ctx, accountCachePrefix(userID))
+}
+
+func principalCacheKey(userID string) string {
+	return "auth:principal:" + userID
+}
+
+func accountCachePrefix(userID string) string {
+	return "account:" + userID + ":"
 }
 
 func verificationCode() string {

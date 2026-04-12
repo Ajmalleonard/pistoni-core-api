@@ -20,6 +20,7 @@ This project implements a strategic, piece-by-piece migration from a legacy Nest
 - **Database ORM:** [Prisma Client Go](https://github.com/steebchen/prisma-client-go)
 - **Realtime:** [Socket.io](https://github.com/googollee/go-socket.io)
 - **Caching/Queue:** [Redis](https://redis.io/)
+- **Profile Acceleration:** Redis-backed JSON caching for authenticated account/profile reads
 - **Authentication:** JWT (HMAC SHA256) + Google OAuth
 
 ## 📂 Project Structure
@@ -46,6 +47,7 @@ core/
 - **🚗 Cars:** Comprehensive vehicle management and classification.
 - **💬 Chat:** Real-time messaging powered by Socket.io and Redis.
 - **👤 Users:** Profile management and owner-specific flows.
+- **🧾 Account/Profile:** Unified profile overview, settings, safety, privacy, documents, device trust, and calendar preferences.
 - **🚕 Providers:** Driver and bodyguard management system.
 - **💳 Payments:** Integration for managing user payment methods.
 - **📅 Rentals:** core rental logic and scheduling.

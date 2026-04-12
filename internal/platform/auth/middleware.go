@@ -27,6 +27,7 @@ func AuthRequired(jwtManager *JWTManager, lookup func(userID string) (any, error
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"statusCode": http.StatusUnauthorized, "message": "Unauthorized"})
 			return
 		}
+		c.Set("userID", claims.Sub)
 		c.Set(userContextKey, user)
 		c.Next()
 	}

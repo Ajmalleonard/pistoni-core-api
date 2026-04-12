@@ -204,6 +204,127 @@ type PrivateUser struct {
 	IsVerified     bool     `json:"isVerified"`
 }
 
+type UserSettings struct {
+	UserID                    string    `json:"userId"`
+	Language                  string    `json:"language"`
+	Timezone                  string    `json:"timezone"`
+	EmailNotifications        bool      `json:"emailNotifications"`
+	PushNotifications         bool      `json:"pushNotifications"`
+	SMSNotifications          bool      `json:"smsNotifications"`
+	TextSize                  string    `json:"textSize"`
+	AccessibilityVoiceOver    bool      `json:"accessibilityVoiceOver"`
+	AccessibilityHighContrast bool      `json:"accessibilityHighContrast"`
+	AccessibilityReduceMotion bool      `json:"accessibilityReduceMotion"`
+	UpdatedAt                 time.Time `json:"updatedAt"`
+}
+
+type SafetyProfile struct {
+	UserID            string    `json:"userId"`
+	HomeCity          *string   `json:"homeCity"`
+	HomeAddress       *string   `json:"homeAddress"`
+	EmergencyProtocol *string   `json:"emergencyProtocol"`
+	EmergencyNotes    *string   `json:"emergencyNotes"`
+	MedicalNotes      *string   `json:"medicalNotes"`
+	ShareLiveLocation bool      `json:"shareLiveLocation"`
+	SOSEnabled        bool      `json:"sosEnabled"`
+	UpdatedAt         time.Time `json:"updatedAt"`
+}
+
+type PrivacySettings struct {
+	UserID               string    `json:"userId"`
+	ProfileVisibility    string    `json:"profileVisibility"`
+	LocationSharing      string    `json:"locationSharing"`
+	AllowMarketingEmails bool      `json:"allowMarketingEmails"`
+	AllowAnalytics       bool      `json:"allowAnalytics"`
+	AllowMessagePreviews bool      `json:"allowMessagePreviews"`
+	UpdatedAt            time.Time `json:"updatedAt"`
+}
+
+type SecuritySettings struct {
+	UserID             string    `json:"userId"`
+	TwoFactorEnabled   bool      `json:"twoFactorEnabled"`
+	TwoFactorMethod    *string   `json:"twoFactorMethod"`
+	SessionAlerts      bool      `json:"sessionAlerts"`
+	LoginNotifications bool      `json:"loginNotifications"`
+	UpdatedAt          time.Time `json:"updatedAt"`
+}
+
+type TrustedContact struct {
+	ID                string    `json:"id"`
+	UserID            string    `json:"userId"`
+	Name              string    `json:"name"`
+	PhoneNumber       string    `json:"phoneNumber"`
+	Relationship      string    `json:"relationship"`
+	Email             *string   `json:"email"`
+	ReceiveTripAlerts bool      `json:"receiveTripAlerts"`
+	IsPrimary         bool      `json:"isPrimary"`
+	CreatedAt         time.Time `json:"createdAt"`
+	UpdatedAt         time.Time `json:"updatedAt"`
+}
+
+type FamilyMember struct {
+	ID           string    `json:"id"`
+	UserID       string    `json:"userId"`
+	Name         string    `json:"name"`
+	Relationship string    `json:"relationship"`
+	PhoneNumber  *string   `json:"phoneNumber"`
+	Email        *string   `json:"email"`
+	AccessLevel  string    `json:"accessLevel"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+type TrustedDevice struct {
+	ID         string    `json:"id"`
+	UserID     string    `json:"userId"`
+	DeviceName string    `json:"deviceName"`
+	Platform   string    `json:"platform"`
+	LastSeenAt time.Time `json:"lastSeenAt"`
+	IsCurrent  bool      `json:"isCurrent"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+type PersonalDocument struct {
+	ID                 string     `json:"id"`
+	UserID             string     `json:"userId"`
+	DocumentType       string     `json:"documentType"`
+	Label              string     `json:"label"`
+	DocumentNumber     *string    `json:"documentNumber"`
+	IssuingCountry     *string    `json:"issuingCountry"`
+	VerificationStatus string     `json:"verificationStatus"`
+	FileURL            *string    `json:"fileUrl"`
+	ExpiryDate         *time.Time `json:"expiryDate"`
+	CreatedAt          time.Time  `json:"createdAt"`
+	UpdatedAt          time.Time  `json:"updatedAt"`
+}
+
+type CalendarConnection struct {
+	ID                    string     `json:"id"`
+	UserID                string     `json:"userId"`
+	Provider              string     `json:"provider"`
+	CalendarName          string     `json:"calendarName"`
+	ExternalCalendarID    *string    `json:"externalCalendarId"`
+	SyncEnabled           bool       `json:"syncEnabled"`
+	ReminderMinutesBefore int        `json:"reminderMinutesBefore"`
+	LastSyncedAt          *time.Time `json:"lastSyncedAt"`
+	CreatedAt             time.Time  `json:"createdAt"`
+	UpdatedAt             time.Time  `json:"updatedAt"`
+}
+
+type AccountOverview struct {
+	User            User                 `json:"user"`
+	Settings        UserSettings         `json:"settings"`
+	Safety          SafetyProfile        `json:"safety"`
+	Privacy         PrivacySettings      `json:"privacy"`
+	Security        SecuritySettings     `json:"security"`
+	TrustedContacts []TrustedContact     `json:"trustedContacts"`
+	FamilyMembers   []FamilyMember       `json:"familyMembers"`
+	TrustedDevices  []TrustedDevice      `json:"trustedDevices"`
+	Documents       []PersonalDocument   `json:"documents"`
+	Calendars       []CalendarConnection `json:"calendars"`
+}
+
 type DriverProfile struct {
 	ID                       string                     `json:"id"`
 	UserID                   string                     `json:"userId"`

@@ -9,6 +9,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 	"pistoni/core/internal/config"
+	accounthandler "pistoni/core/internal/modules/account/handler"
+	accountrepo "pistoni/core/internal/modules/account/repo"
+	accountservice "pistoni/core/internal/modules/account/service"
 	authhandler "pistoni/core/internal/modules/auth/handler"
 	authrepo "pistoni/core/internal/modules/auth/repo"
 	authservice "pistoni/core/internal/modules/auth/service"
@@ -105,6 +108,7 @@ func New(cfg config.Config) (*Server, error) {
 
 	redisConn := platformredis.Connect(cfg)
 	var signalPublisher chatqueue.QueuePublisher
+	accountCache := platformredis.NewJSONCache(redisConn, time.Duration(cfg.RedisProfileTTL)*time.Second)
 	if redisConn.Enabled {
 		signalPublisher = chatqueue.NewRedisStreamPublisher(redisConn.Client, cfg.RedisQueueStream)
 		log.Printf("[redis] connected endpoint=%s stream=%s", redisConn.Endpoint, cfg.RedisQueueStream)
@@ -112,6 +116,9 @@ func New(cfg config.Config) (*Server, error) {
 		signalPublisher = chatqueue.NewNoopPublisher()
 		log.Printf("[redis] degraded mode enabled: %s", redisConn.Reason)
 	}
+	authSvc.WithCache(accountCache)
+	accountSvc := accountservice.New(accountrepo.NewMemoryRepository(store, userRepo), accountCache)
+	accountH := accounthandler.New(accountSvc)
 
 	chatSocket, err := chatgateway.New(chatSvc, jwtManager, cfg.SocketPath, signalPublisher)
 	if err != nil {
@@ -122,6 +129,7 @@ func New(cfg config.Config) (*Server, error) {
 
 	r.GET("/health", func(c *gin.Context) { c.JSON(200, gin.H{"status": "ok", "service": "pistoni-core-go"}) })
 	authH.Register(r.Group("/auth"), authRequired)
+	accountH.Register(r.Group("/account"), authRequired)
 	carsH.Register(r.Group("/cars"))
 	usersH.Register(r.Group("/users"))
 	providersH.Register(r.Group("/providers"), authRequired, adminOnly, sensitiveQueue, retryBackoff)

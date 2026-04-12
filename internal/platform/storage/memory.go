@@ -33,6 +33,20 @@ type MemoryStore struct {
 	MessagesByRoom         map[string][]string
 	DriverStatusVersion    int64
 	BodyGuardStatusVersion int64
+	UserSettingsByUser     map[string]model.UserSettings
+	SafetyByUser           map[string]model.SafetyProfile
+	PrivacyByUser          map[string]model.PrivacySettings
+	SecurityByUser         map[string]model.SecuritySettings
+	TrustedContacts        map[string]model.TrustedContact
+	TrustedContactByUser   map[string][]string
+	FamilyMembers          map[string]model.FamilyMember
+	FamilyMemberByUser     map[string][]string
+	TrustedDevices         map[string]model.TrustedDevice
+	TrustedDeviceByUser    map[string][]string
+	Documents              map[string]model.PersonalDocument
+	DocumentByUser         map[string][]string
+	Calendars              map[string]model.CalendarConnection
+	CalendarByUser         map[string][]string
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -59,5 +73,19 @@ func NewMemoryStore() *MemoryStore {
 		ChatRooms:            map[string]model.ChatRoom{},
 		Messages:             map[string]model.Message{},
 		MessagesByRoom:       map[string][]string{},
+		UserSettingsByUser:   map[string]model.UserSettings{},
+		SafetyByUser:         map[string]model.SafetyProfile{},
+		PrivacyByUser:        map[string]model.PrivacySettings{},
+		SecurityByUser:       map[string]model.SecuritySettings{},
+		TrustedContacts:      map[string]model.TrustedContact{},
+		TrustedContactByUser: map[string][]string{},
+		FamilyMembers:        map[string]model.FamilyMember{},
+		FamilyMemberByUser:   map[string][]string{},
+		TrustedDevices:       map[string]model.TrustedDevice{},
+		TrustedDeviceByUser:  map[string][]string{},
+		Documents:            map[string]model.PersonalDocument{},
+		DocumentByUser:       map[string][]string{},
+		Calendars:            map[string]model.CalendarConnection{},
+		CalendarByUser:       map[string][]string{},
 	}
 }

@@ -29,6 +29,7 @@ type Config struct {
 	RedisPassword      string
 	RedisDB            int
 	RedisQueueStream   string
+	RedisProfileTTL    int
 }
 
 func Load() Config {
@@ -55,6 +56,7 @@ func Load() Config {
 		RedisPassword:      getEnv("REDIS_PASSWORD", ""),
 		RedisDB:            getEnvInt("REDIS_DB", 0),
 		RedisQueueStream:   getEnv("REDIS_QUEUE_STREAM", "pistoni:chat:signals"),
+		RedisProfileTTL:    getEnvInt("REDIS_PROFILE_CACHE_TTL_SECONDS", 120),
 	}
 
 	if cfg.DatabaseURL == "" {
