@@ -1,11 +1,16 @@
 package repo
 
 import (
+	"database/sql"
 	"fmt"
+	"log"
+	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"pistoni/core/internal/modules/providers/dto"
 	usersrepo "pistoni/core/internal/modules/users/repo"
 	"pistoni/core/internal/platform/apperr"
@@ -33,6 +38,7 @@ type Repository interface {
 	FindBodyGuards(q dto.FindProviderQuery) ([]map[string]any, error)
 	FindBodyGuardByID(id string) (map[string]any, error)
 	GetMyBodyGuardProfile(userID string) (map[string]any, error)
+	GetMyBodyGuardQueue(userID string) (map[string]any, error)
 	UpdateMyBodyGuardAvailability(userID string, isAvailable bool) (map[string]any, error)
 	UpdateBodyGuardVerification(id string, in dto.UpdateVerificationDTO) (map[string]any, error)
 	GetBodyGuardStatus(id string) (map[string]any, error)
@@ -371,6 +377,14 @@ func (r *MemoryRepository) RegisterBodyGuard(userID string, in dto.RegisterBodyG
 }
 
 func (r *MemoryRepository) FindBodyGuards(q dto.FindProviderQuery) ([]map[string]any, error) {
+	if dbURL := strings.TrimSpace(os.Getenv("DATABASE_URL")); dbURL != "" {
+		if rows, err := findBodyGuardsFromDB(dbURL, q); err == nil {
+			return rows, nil
+		} else {
+			log.Printf("[providers] db read failed for body guards, falling back to memory: %v", err)
+		}
+	}
+
 	r.store.Mu.RLock()
 	items := []model.BodyGuardProfile{}
 	for _, p := range r.store.BodyGuardProfiles {
@@ -394,6 +408,129 @@ func (r *MemoryRepository) FindBodyGuards(q dto.FindProviderQuery) ([]map[string
 	return r.bodyGuardViews(items, false), nil
 }
 
+func findBodyGuardsFromDB(dbURL string, q dto.FindProviderQuery) ([]map[string]any, error) {
+	db, err := sql.Open("pgx", dbURL)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	if err := db.Ping(); err != nil {
+		return nil, err
+	}
+
+	status := q.VerificationStatus
+	if status == "" {
+		status = string(model.VerificationApproved)
+	}
+
+	where := []string{"bg.\"verificationStatus\" = $1"}
+	args := []any{status}
+	idx := 2
+
+	if q.IsAvailable != nil {
+		where = append(where, fmt.Sprintf("bg.\"isAvailable\" = $%d", idx))
+		args = append(args, *q.IsAvailable)
+		idx++
+	}
+	if q.Gender != "" {
+		where = append(where, fmt.Sprintf("bg.gender = $%d", idx))
+		args = append(args, q.Gender)
+		idx++
+	}
+
+	query := `
+		SELECT
+			bg.id,
+			bg."pistoniIdNumber",
+			bg.gender,
+			bg."yearsOfExperience",
+			bg."dailyRate",
+			bg."isAvailable",
+			bg."verificationStatus",
+			u.id,
+			u.name,
+			u."phoneNumber",
+			u."profilePicture",
+			COALESCE(u.status, 'OFFLINE')
+		FROM "BodyGuardProfile" bg
+		JOIN "User" u ON u.id = bg."userId"
+		WHERE ` + strings.Join(where, " AND ") + `
+		ORDER BY bg."createdAt" DESC
+	`
+
+	rs, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rs.Close()
+
+	out := make([]map[string]any, 0)
+	for rs.Next() {
+		var (
+			id, pistoniID, gender, verificationStatus string
+			userID, userName, statusStr               string
+			yearsOfExperience                         sql.NullInt32
+			dailyRate                                 float64
+			isAvailable                               bool
+			phoneNumber, profilePicture               sql.NullString
+		)
+		if err := rs.Scan(
+			&id,
+			&pistoniID,
+			&gender,
+			&yearsOfExperience,
+			&dailyRate,
+			&isAvailable,
+			&verificationStatus,
+			&userID,
+			&userName,
+			&phoneNumber,
+			&profilePicture,
+			&statusStr,
+		); err != nil {
+			return nil, err
+		}
+
+		var years *int
+		if yearsOfExperience.Valid {
+			v := int(yearsOfExperience.Int32)
+			years = &v
+		}
+		var phonePtr *string
+		if phoneNumber.Valid {
+			v := phoneNumber.String
+			phonePtr = &v
+		}
+		var picPtr *string
+		if profilePicture.Valid {
+			v := profilePicture.String
+			picPtr = &v
+		}
+
+		out = append(out, map[string]any{
+			"id":                 id,
+			"pistoniIdNumber":    pistoniID,
+			"gender":             gender,
+			"yearsOfExperience":  years,
+			"dailyRate":          dailyRate,
+			"isAvailable":        isAvailable,
+			"status":             statusStr,
+			"verificationStatus": verificationStatus,
+			"user": map[string]any{
+				"id":             userID,
+				"name":           userName,
+				"phoneNumber":    phonePtr,
+				"profilePicture": picPtr,
+			},
+		})
+	}
+	if err := rs.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (r *MemoryRepository) FindBodyGuardByID(id string) (map[string]any, error) {
 	r.store.Mu.RLock()
 	p, ok := r.store.BodyGuardProfiles[id]
@@ -414,6 +551,18 @@ func (r *MemoryRepository) GetMyBodyGuardProfile(userID string) (map[string]any,
 	p := r.store.BodyGuardProfiles[id]
 	r.store.Mu.RUnlock()
 	return r.bodyGuardView(p, true), nil
+}
+
+func (r *MemoryRepository) GetMyBodyGuardQueue(userID string) (map[string]any, error) {
+	r.store.Mu.RLock()
+	id, ok := r.store.BodyGuardQueueByUser[userID]
+	if !ok {
+		r.store.Mu.RUnlock()
+		return nil, apperr.New(404, "Body guard application not found")
+	}
+	item := r.store.BodyGuardQueue[id]
+	r.store.Mu.RUnlock()
+	return map[string]any{"queueItem": item}, nil
 }
 
 func (r *MemoryRepository) UpdateMyBodyGuardAvailability(userID string, isAvailable bool) (map[string]any, error) {
