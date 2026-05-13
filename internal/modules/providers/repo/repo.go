@@ -377,6 +377,30 @@ func (r *MemoryRepository) RegisterBodyGuard(userID string, in dto.RegisterBodyG
 }
 
 func (r *MemoryRepository) FindBodyGuards(q dto.FindProviderQuery) ([]map[string]any, error) {
+	if useSeedMemoryBodyGuards() {
+		r.store.Mu.RLock()
+		items := []model.BodyGuardProfile{}
+		for _, p := range r.store.BodyGuardProfiles {
+			if q.IsAvailable != nil && p.IsAvailable != *q.IsAvailable {
+				continue
+			}
+			status := q.VerificationStatus
+			if status == "" {
+				status = string(model.VerificationApproved)
+			}
+			if string(p.VerificationStatus) != status {
+				continue
+			}
+			if q.Gender != "" && string(p.Gender) != q.Gender {
+				continue
+			}
+			items = append(items, p)
+		}
+		r.store.Mu.RUnlock()
+		sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+		return r.bodyGuardViews(items, false), nil
+	}
+
 	if dbURL := strings.TrimSpace(os.Getenv("DATABASE_URL")); dbURL != "" {
 		if rows, err := findBodyGuardsFromDB(dbURL, q); err == nil {
 			return rows, nil
@@ -406,6 +430,16 @@ func (r *MemoryRepository) FindBodyGuards(q dto.FindProviderQuery) ([]map[string
 	r.store.Mu.RUnlock()
 	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
 	return r.bodyGuardViews(items, false), nil
+}
+
+func useSeedMemoryBodyGuards() bool {
+	v := strings.TrimSpace(os.Getenv("SEED_FROM_PRODUCTION"))
+	switch strings.ToLower(v) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func findBodyGuardsFromDB(dbURL string, q dto.FindProviderQuery) ([]map[string]any, error) {

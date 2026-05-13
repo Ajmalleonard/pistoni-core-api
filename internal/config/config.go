@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -11,6 +12,8 @@ import (
 type Config struct {
 	Port               string
 	DatabaseURL        string
+	SeedFromProduction bool
+	SeedSourceURL      string
 	JWTSecret          string
 	GoogleClientID     string
 	GoogleClientSecret string
@@ -38,6 +41,8 @@ func Load() Config {
 	cfg := Config{
 		Port:               getEnv("PORT", "4000"),
 		DatabaseURL:        os.Getenv("DATABASE_URL"),
+		SeedFromProduction: getEnvBool("SEED_FROM_PRODUCTION", false),
+		SeedSourceURL:      getEnv("SEED_SOURCE_URL", "https://core.api.pistoni.io"),
 		JWTSecret:          os.Getenv("JWT_SECRET"),
 		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
@@ -92,4 +97,19 @@ func getEnvInt(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	switch strings.ToLower(v) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }

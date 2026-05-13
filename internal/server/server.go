@@ -92,10 +92,12 @@ func New(cfg config.Config) (*Server, error) {
 	authRequired := auth.AuthRequired(jwtManager, func(userID string) (any, error) { return authSvc.UserForAuth(userID) })
 	adminOnly := auth.RequireRoles(string(model.UserRoleAdmin))
 
-	carSvc := carservice.New(carrepo.NewMemoryRepository(store, userRepo))
+	carRepo := carrepo.NewMemoryRepository(store, userRepo)
+	carSvc := carservice.New(carRepo)
 	carsH := carhandler.New(carSvc)
 
-	providersSvc := providersservice.New(providersrepo.NewMemoryRepository(store, userRepo))
+	providersRepo := providersrepo.NewMemoryRepository(store, userRepo)
+	providersSvc := providersservice.New(providersRepo)
 	providersH := providershandler.New(providersSvc)
 	paymentMethodsSvc := paymentmethodsservice.New(paymentmethodsrepo.NewMemoryRepository(store))
 	paymentMethodsH := paymentmethodshandler.New(paymentMethodsSvc)
@@ -105,6 +107,7 @@ func New(cfg config.Config) (*Server, error) {
 	notificationsH := notificationshandler.New(notificationsSvc)
 	chatSvc := chatservice.New(chatrepo.NewMemoryRepository(store, userRepo))
 	chatH := chathandler.New(chatSvc)
+	seedDevelopmentData(cfg, userRepo, carRepo, providersRepo)
 
 	redisConn := platformredis.Connect(cfg)
 	var signalPublisher chatqueue.QueuePublisher
@@ -135,8 +138,8 @@ func New(cfg config.Config) (*Server, error) {
 	providersH.Register(r.Group("/providers"), authRequired, adminOnly, sensitiveQueue, retryBackoff)
 	paymentMethodsH.Register(r.Group("/payment-methods"))
 	rentalsH.Register(r.Group("/rentals"))
-	notificationsH.Register(r.Group("/notifications"))
-	chatH.Register(r.Group("/chat"))
+	notificationsH.Register(r.Group("/notifications", authRequired))
+	chatH.Register(r.Group("/chat", authRequired))
 
 	go func() {
 		if err := chatSocket.Server().Serve(); err != nil {

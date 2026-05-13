@@ -39,6 +39,7 @@ func (h *Handler) Register(r *gin.RouterGroup, authRequired gin.HandlerFunc, adm
 	bgs.POST("/register", authRequired, retryBackoff, sensitiveQueue, h.registerBodyGuard)
 	bgs.GET("", h.findBodyGuards)
 	bgs.GET("/me/profile", authRequired, h.getMyBodyGuardProfile)
+	bgs.GET("/me/queue", authRequired, h.getMyBodyGuardQueue)
 	bgs.GET("/me/status", authRequired, h.getMyBodyGuardStatus)
 	bgs.PATCH("/me/status", authRequired, retryBackoff, sensitiveQueue, h.updateMyBodyGuardStatus)
 	bgs.PATCH("/me/availability", authRequired, retryBackoff, sensitiveQueue, h.updateMyBodyGuardAvailability)
@@ -140,6 +141,10 @@ func (h *Handler) findBodyGuards(c *gin.Context) {
 }
 func (h *Handler) getMyBodyGuardProfile(c *gin.Context) {
 	data, err := h.svc.GetMyBodyGuardProfile(principal(c).User.ID)
+	respond(c, data, err)
+}
+func (h *Handler) getMyBodyGuardQueue(c *gin.Context) {
+	data, err := h.svc.GetMyBodyGuardQueue(principal(c).User.ID)
 	respond(c, data, err)
 }
 func (h *Handler) getMyBodyGuardStatus(c *gin.Context) {

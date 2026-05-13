@@ -5,10 +5,10 @@ generator db {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
-// Keep this schema in sync with ../prisma/schema.prisma
-// For now, mirror all models so Go service can progressively replace NestJS modules.
+
 
 enum UserRole {
   ADMIN
@@ -45,6 +45,7 @@ enum VehicleType {
   SUV
   COASTER
   LONG_VEHICLE
+  LUXURY
 }
 
 enum Gender {

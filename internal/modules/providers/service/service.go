@@ -55,6 +55,9 @@ func (s *Service) FindBodyGuards(q dto.FindProviderQuery) (any, error) {
 func (s *Service) GetMyBodyGuardProfile(userID string) (any, error) {
 	return s.repo.GetMyBodyGuardProfile(userID)
 }
+func (s *Service) GetMyBodyGuardQueue(userID string) (any, error) {
+	return s.repo.GetMyBodyGuardQueue(userID)
+}
 func (s *Service) UpdateMyBodyGuardAvailability(userID string, isAvailable bool) (any, error) {
 	return s.repo.UpdateMyBodyGuardAvailability(userID, isAvailable)
 }
