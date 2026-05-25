@@ -15,7 +15,9 @@ type Handler struct{ svc *service.Service }
 func New(s *service.Service) *Handler { return &Handler{svc: s} }
 func (h *Handler) Register(r *gin.RouterGroup) {
 	r.POST("", h.create)
+	r.POST("/route", h.createRouteRentals)
 	r.POST("/calculate-price", h.calculatePrice)
+	r.POST("/calculate-route-price", h.calculateRoutePrice)
 	r.GET("", h.findAll)
 	r.GET("/user/:userId", h.findByUser)
 	r.GET("/:id", h.findOne)
@@ -26,9 +28,23 @@ func (h *Handler) create(c *gin.Context) {
 	var in dto.CreateRentalDTO
 	bind(c, &in, func() (any, error) { return h.svc.Create(in) })
 }
+func (h *Handler) createRouteRentals(c *gin.Context) {
+	var in dto.CreateRouteRentalsDTO
+	bind(c, &in, func() (any, error) {
+		rentals, err := h.svc.CreateRouteRentals(in)
+		if err != nil {
+			return nil, err
+		}
+		return gin.H{"rentals": rentals, "totalPrice": in.TotalPrice}, nil
+	})
+}
 func (h *Handler) calculatePrice(c *gin.Context) {
 	var in dto.CalculateRentalPriceDTO
 	bind(c, &in, func() (any, error) { return h.svc.CalculateRentalPrice(in) })
+}
+func (h *Handler) calculateRoutePrice(c *gin.Context) {
+	var in dto.CalculateRoutePriceDTO
+	bind(c, &in, func() (any, error) { return h.svc.CalculateRoutePrice(in) })
 }
 func (h *Handler) findAll(c *gin.Context) {
 	skip, _ := strconv.Atoi(c.Query("skip"))

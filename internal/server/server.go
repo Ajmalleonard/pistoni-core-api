@@ -99,15 +99,22 @@ func New(cfg config.Config) (*Server, error) {
 	providersRepo := providersrepo.NewMemoryRepository(store, userRepo)
 	providersSvc := providersservice.New(providersRepo)
 	providersH := providershandler.New(providersSvc)
-	paymentMethodsSvc := paymentmethodsservice.New(paymentmethodsrepo.NewMemoryRepository(store))
-	paymentMethodsH := paymentmethodshandler.New(paymentMethodsSvc)
-	rentalsSvc := rentalsservice.New(rentalsrepo.NewMemoryRepository(store))
-	rentalsH := rentalshandler.New(rentalsSvc)
-	notificationsSvc := notificationsservice.New(notificationsrepo.NewMemoryRepository(store))
-	notificationsH := notificationshandler.New(notificationsSvc)
-	chatSvc := chatservice.New(chatrepo.NewMemoryRepository(store, userRepo))
-	chatH := chathandler.New(chatSvc)
-	seedDevelopmentData(cfg, userRepo, carRepo, providersRepo)
+	accountRepo := accountrepo.NewMemoryRepository(store, userRepo)
+	paymentMethodsRepo := paymentmethodsrepo.NewMemoryRepository(store)
+	rentalsRepo := rentalsrepo.NewMemoryRepository(store)
+	notificationsRepo := notificationsrepo.NewMemoryRepository(store)
+	chatRepo := chatrepo.NewMemoryRepository(store, userRepo)
+	seedDevelopmentData(cfg, seedDependencies{
+		Store:         store,
+		Users:         userRepo,
+		Cars:          carRepo,
+		Providers:     providersRepo,
+		Accounts:      accountRepo,
+		Payments:      paymentMethodsRepo,
+		Rentals:       rentalsRepo,
+		Chat:          chatRepo,
+		Notifications: notificationsRepo,
+	})
 
 	redisConn := platformredis.Connect(cfg)
 	var signalPublisher chatqueue.QueuePublisher
@@ -120,8 +127,16 @@ func New(cfg config.Config) (*Server, error) {
 		log.Printf("[redis] degraded mode enabled: %s", redisConn.Reason)
 	}
 	authSvc.WithCache(accountCache)
-	accountSvc := accountservice.New(accountrepo.NewMemoryRepository(store, userRepo), accountCache)
+	accountSvc := accountservice.New(accountRepo, accountCache)
 	accountH := accounthandler.New(accountSvc)
+	paymentMethodsSvc := paymentmethodsservice.New(paymentMethodsRepo)
+	paymentMethodsH := paymentmethodshandler.New(paymentMethodsSvc)
+	rentalsSvc := rentalsservice.New(rentalsRepo)
+	rentalsH := rentalshandler.New(rentalsSvc)
+	notificationsSvc := notificationsservice.New(notificationsRepo)
+	notificationsH := notificationshandler.New(notificationsSvc)
+	chatSvc := chatservice.New(chatRepo)
+	chatH := chathandler.New(chatSvc)
 
 	chatSocket, err := chatgateway.New(chatSvc, jwtManager, cfg.SocketPath, signalPublisher)
 	if err != nil {

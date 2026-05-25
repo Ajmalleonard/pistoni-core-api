@@ -65,7 +65,7 @@ func (m *SMTPMailer) send(to, subject, plain, html string) error {
 	msg.WriteString(html + "\r\n\r\n")
 	msg.WriteString("--" + boundary + "--")
 
-	addr := fmt.Sprintf("%s:%d", m.host, m.port)
+	addr := net.JoinHostPort(m.host, strconv.Itoa(m.port))
 	auth := smtp.PlainAuth("", m.user, m.pass, m.host)
 	log.Printf("[mailer] smtp send attempt to=%s host=%s port=%d subject=%q", to, m.host, m.port, subject)
 

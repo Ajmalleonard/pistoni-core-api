@@ -12,6 +12,9 @@ type Service struct{ repo repo.Repository }
 
 func New(r repo.Repository) *Service                                   { return &Service{repo: r} }
 func (s *Service) Create(in dto.CreateRentalDTO) (model.Rental, error) { return s.repo.Create(in) }
+func (s *Service) CreateRouteRentals(in dto.CreateRouteRentalsDTO) ([]model.Rental, error) {
+	return s.repo.CreateRouteRentals(in)
+}
 func (s *Service) FindAll(skip, take int, userID, status string) ([]model.Rental, error) {
 	return s.repo.FindAll(repo.Query{Skip: skip, Take: take, UserID: userID, Status: status})
 }
@@ -31,4 +34,16 @@ func (s *Service) CalculateRentalPrice(in dto.CalculateRentalPriceDTO) (map[stri
 		return nil, err
 	}
 	return s.repo.CalculateRentalPrice(sd, ed, in.CarID, in.DistanceKM, in.DriverID, in.BodyGuardIDs)
+}
+
+func (s *Service) CalculateRoutePrice(in dto.CalculateRoutePriceDTO) (map[string]any, error) {
+	sd, err := time.Parse(time.RFC3339, in.StartDate)
+	if err != nil {
+		return nil, err
+	}
+	ed, err := time.Parse(time.RFC3339, in.EndDate)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.CalculateRoutePrice(sd, ed, in.Cars, in.DistanceKM, in.BodyGuardIDs)
 }

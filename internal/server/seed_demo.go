@@ -28,7 +28,7 @@ type productionSnapshot struct {
 	BodyGuards []map[string]any
 }
 
-func seedDevelopmentData(cfg config.Config, userRepo usersrepo.Repository, carRepo carrepo.Repository, providerRepo providersrepo.Repository) {
+func seedDevelopmentData(cfg config.Config, deps seedDependencies) {
 	seedPassword, err := hashSeedPassword()
 	if err != nil {
 		log.Printf("[seed] demo password hash failed: %v", err)
@@ -43,7 +43,7 @@ func seedDevelopmentData(cfg config.Config, userRepo usersrepo.Repository, carRe
 			log.Printf("[seed] production snapshot unavailable from %s: %v", cfg.SeedSourceURL, snapshotErr)
 		}
 
-		syncedUsers := syncProductionUsers(userRepo, snapshot.Users, seedPassword)
+		syncedUsers := syncProductionUsers(deps.Users, snapshot.Users, seedPassword)
 		if syncedUsers > 0 {
 			log.Printf("[seed] synced %d users from %s", syncedUsers, cfg.SeedSourceURL)
 		}
@@ -51,10 +51,10 @@ func seedDevelopmentData(cfg config.Config, userRepo usersrepo.Repository, carRe
 		log.Printf("[seed] production sync disabled; using local fallback catalog")
 	}
 
-	fleetOwner, err := seedFleetOwner(userRepo, seedPassword)
+	fleetOwner, err := seedFleetOwner(deps.Users, seedPassword)
 	if err != nil {
 		log.Printf("[seed] fleet owner seed failed, falling back to admin: %v", err)
-		fleetOwner, err = userRepo.FindByEmail("admin@pistoni.local")
+		fleetOwner, err = deps.Users.FindByEmail("admin@pistoni.local")
 		if err != nil {
 			log.Printf("[seed] admin lookup failed, demo data skipped: %v", err)
 			return
@@ -63,19 +63,25 @@ func seedDevelopmentData(cfg config.Config, userRepo usersrepo.Repository, carRe
 
 	bodyguardsCreated := 0
 	if len(snapshot.BodyGuards) > 0 {
-		bodyguardsCreated = syncProductionBodyGuards(userRepo, providerRepo, snapshot.BodyGuards)
+		bodyguardsCreated = syncProductionBodyGuards(deps.Users, deps.Providers, snapshot.BodyGuards)
 	}
 	if bodyguardsCreated == 0 {
-		bodyguardsCreated = seedDemoBodyGuards(userRepo, providerRepo, seedPassword)
+		bodyguardsCreated = seedDemoBodyGuards(deps.Users, deps.Providers, seedPassword)
 	}
 
 	carsCreated := 0
 	if len(snapshot.Cars) > 0 {
-		carsCreated = syncProductionCars(carRepo, userRepo, snapshot.Cars, fleetOwner.ID)
+		carsCreated = syncProductionCars(deps.Cars, deps.Users, snapshot.Cars, fleetOwner.ID)
 	}
 	if carsCreated == 0 {
-		carsCreated = seedDemoCars(carRepo, fleetOwner.ID)
+		carsCreated = seedDemoCars(deps.Cars, fleetOwner.ID)
 	}
+
+	adminUser := fleetOwner
+	if admin, err := deps.Users.FindByEmail("admin@pistoni.local"); err == nil {
+		adminUser = admin
+	}
+	seedRealAppExperience(deps, adminUser, seedPassword)
 
 	log.Printf("[seed] core catalog ready source=%s owner=%s bodyguards=%d cars=%d", cfg.SeedSourceURL, fleetOwner.Email, bodyguardsCreated, carsCreated)
 }
@@ -165,7 +171,7 @@ func seedDemoBodyGuards(userRepo usersrepo.Repository, providerRepo providersrep
 			Name:           name,
 			PhoneNumber:    &phone,
 			ProfilePicture: &profilePicture,
-			Role:           model.UserRoleBodyGuard,
+			Role:           model.UserRoleClient,
 			IsVerified:     true,
 			AuthProvider:   model.AuthProviderEmail,
 		})
@@ -177,6 +183,7 @@ func seedDemoBodyGuards(userRepo usersrepo.Repository, providerRepo providersrep
 		if profile, err := providerRepo.GetMyBodyGuardProfile(bodyGuardUser.ID); err == nil {
 			if profileID, ok := profile["id"].(string); ok {
 				if err := approveBodyGuardProfile(providerRepo, profileID, approved, available); err == nil {
+					_, _ = providerRepo.UpdateMyBodyGuardStatus(bodyGuardUser.ID, providersdto.UpdateBodyGuardStatusDTO{Status: string(model.BodyGuardStatusOnline), IsAvailable: &available})
 					created++
 				}
 				continue
@@ -209,6 +216,7 @@ func seedDemoBodyGuards(userRepo usersrepo.Repository, providerRepo providersrep
 			log.Printf("[seed] bodyguard approval %s: %v", email, err)
 			continue
 		}
+		_, _ = providerRepo.UpdateMyBodyGuardStatus(bodyGuardUser.ID, providersdto.UpdateBodyGuardStatusDTO{Status: string(model.BodyGuardStatusOnline), IsAvailable: &available})
 		created++
 	}
 

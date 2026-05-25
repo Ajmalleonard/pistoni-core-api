@@ -377,28 +377,11 @@ func (r *MemoryRepository) RegisterBodyGuard(userID string, in dto.RegisterBodyG
 }
 
 func (r *MemoryRepository) FindBodyGuards(q dto.FindProviderQuery) ([]map[string]any, error) {
-	if useSeedMemoryBodyGuards() {
-		r.store.Mu.RLock()
-		items := []model.BodyGuardProfile{}
-		for _, p := range r.store.BodyGuardProfiles {
-			if q.IsAvailable != nil && p.IsAvailable != *q.IsAvailable {
-				continue
-			}
-			status := q.VerificationStatus
-			if status == "" {
-				status = string(model.VerificationApproved)
-			}
-			if string(p.VerificationStatus) != status {
-				continue
-			}
-			if q.Gender != "" && string(p.Gender) != q.Gender {
-				continue
-			}
-			items = append(items, p)
-		}
-		r.store.Mu.RUnlock()
-		sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
-		return r.bodyGuardViews(items, false), nil
+	r.store.Mu.RLock()
+	hasMemoryBodyGuards := len(r.store.BodyGuardProfiles) > 0
+	r.store.Mu.RUnlock()
+	if hasMemoryBodyGuards || useSeedMemoryBodyGuards() {
+		return r.findBodyGuardsFromMemory(q), nil
 	}
 
 	if dbURL := strings.TrimSpace(os.Getenv("DATABASE_URL")); dbURL != "" {
@@ -409,6 +392,10 @@ func (r *MemoryRepository) FindBodyGuards(q dto.FindProviderQuery) ([]map[string
 		}
 	}
 
+	return r.findBodyGuardsFromMemory(q), nil
+}
+
+func (r *MemoryRepository) findBodyGuardsFromMemory(q dto.FindProviderQuery) []map[string]any {
 	r.store.Mu.RLock()
 	items := []model.BodyGuardProfile{}
 	for _, p := range r.store.BodyGuardProfiles {
@@ -429,7 +416,7 @@ func (r *MemoryRepository) FindBodyGuards(q dto.FindProviderQuery) ([]map[string
 	}
 	r.store.Mu.RUnlock()
 	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
-	return r.bodyGuardViews(items, false), nil
+	return r.bodyGuardViews(items, false)
 }
 
 func useSeedMemoryBodyGuards() bool {
