@@ -11,7 +11,7 @@ on:
         default: "main"
 
 env:
-  GO_VERSION: "1.25.6"
+  GO_VERSION: "1.25.0"
 
 jobs:
   test-and-build:
@@ -63,11 +63,21 @@ jobs:
             /usr/local/go/bin/go version
             /usr/local/go/bin/go test ./...
             /usr/local/go/bin/go build -buildvcs=false -o /tmp/pistoni-core-api ./cmd/api
-            sudo install -m 755 /tmp/pistoni-core-api /usr/local/bin/pistoni-core-api
 
-            sudo systemctl restart pistoni-core-api
-            sleep 3
-            sudo systemctl is-active --quiet pistoni-core-api
+            sudo systemctl stop pistoni-core-api || true
+            sudo systemctl reset-failed pistoni-core-api || true
+
+            install -m 755 /tmp/pistoni-core-api "$APP_DIR/pistoni-core"
+
+            if pm2 describe pistoni-core-api >/dev/null 2>&1; then
+              pm2 restart pistoni-core-api --update-env
+            else
+              pm2 start "$APP_DIR/pistoni-core" --name pistoni-core-api --cwd "$APP_DIR" --interpreter none
+            fi
+
+            pm2 save
+            sleep 5
+            pm2 describe pistoni-core-api | grep -q "online"
             curl -fsS --max-time 10 http://127.0.0.1:1012/health
 
       - name: Post-deploy summary
@@ -111,6 +121,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Send notification email
+        continue-on-error: true
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: ${{ secrets.CI_SMTP_HOST }}
