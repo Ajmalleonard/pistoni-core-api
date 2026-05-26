@@ -12,7 +12,7 @@ type Service struct{ repo repo.Repository }
 
 func New(r repo.Repository) *Service                                   { return &Service{repo: r} }
 func (s *Service) Create(in dto.CreateRentalDTO) (model.Rental, error) { return s.repo.Create(in) }
-func (s *Service) CreateRouteRentals(in dto.CreateRouteRentalsDTO) ([]model.Rental, error) {
+func (s *Service) CreateRouteRentals(in dto.CreateRouteRentalsDTO) (repo.RouteRentalsResult, error) {
 	return s.repo.CreateRouteRentals(in)
 }
 func (s *Service) FindAll(skip, take int, userID, status string) ([]model.Rental, error) {

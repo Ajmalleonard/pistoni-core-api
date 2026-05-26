@@ -464,6 +464,9 @@ type ChatRoom struct {
 	ID             string    `json:"id"`
 	Name           *string   `json:"name"`
 	Type           string    `json:"type"`
+	TripID         *string   `json:"tripId,omitempty"`
+	Key            *string   `json:"key,omitempty"`
+	Status         string    `json:"status,omitempty"`
 	ParticipantIDs []string  `json:"participantIds"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`

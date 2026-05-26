@@ -12,15 +12,18 @@ import (
 func TestCreateRouteRentalsCreatesOneRentalPerSelectedCar(t *testing.T) {
 	st := storage.NewMemoryStore()
 	st.Users["u1"] = model.User{ID: "u1"}
+	st.Users["system"] = model.User{ID: "system", Role: model.UserRoleAdmin}
+	st.Users["driver-user-1"] = model.User{ID: "driver-user-1", Role: model.UserRoleDriver}
+	st.Users["guard-user-1"] = model.User{ID: "guard-user-1", Role: model.UserRoleBodyGuard}
 	st.Cars["c1"] = model.Car{ID: "c1", Price: 100}
 	st.Cars["c2"] = model.Car{ID: "c2", Price: 200}
-	st.DriverProfiles["d1"] = model.DriverProfile{ID: "d1", IsAvailable: true}
-	st.BodyGuardProfiles["bg1"] = model.BodyGuardProfile{ID: "bg1", IsAvailable: true}
+	st.DriverProfiles["d1"] = model.DriverProfile{ID: "d1", UserID: "driver-user-1", IsAvailable: true}
+	st.BodyGuardProfiles["bg1"] = model.BodyGuardProfile{ID: "bg1", UserID: "guard-user-1", IsAvailable: true}
 
 	driverID := "d1"
 	distance := 18.5
 	repository := NewMemoryRepository(st)
-	rentals, err := repository.CreateRouteRentals(dto.CreateRouteRentalsDTO{
+	result, err := repository.CreateRouteRentals(dto.CreateRouteRentalsDTO{
 		StartDate:         time.Now().UTC().Format(time.RFC3339),
 		EndDate:           time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
 		TotalPrice:        600,
@@ -37,6 +40,7 @@ func TestCreateRouteRentalsCreatesOneRentalPerSelectedCar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRouteRentals() error = %v", err)
 	}
+	rentals := result.Rentals
 	if len(rentals) != 2 {
 		t.Fatalf("expected 2 rentals got %d", len(rentals))
 	}
@@ -53,6 +57,23 @@ func TestCreateRouteRentalsCreatesOneRentalPerSelectedCar(t *testing.T) {
 		if len(rental.BodyGuardIDs) != 1 || rental.BodyGuardIDs[0] != "bg1" {
 			t.Fatalf("expected shared bodyguard bg1 got %+v", rental.BodyGuardIDs)
 		}
+	}
+	if len(result.ChatRooms) != 5 {
+		t.Fatalf("expected client/driver/bodyguard rooms across two rentals got %d", len(result.ChatRooms))
+	}
+	var hasClient, hasDriverOps, hasBGTeam bool
+	for _, room := range result.ChatRooms {
+		switch room.Type {
+		case "client":
+			hasClient = true
+		case "driver_ops":
+			hasDriverOps = true
+		case "bg_team":
+			hasBGTeam = true
+		}
+	}
+	if !hasClient || !hasDriverOps || !hasBGTeam {
+		t.Fatalf("expected VIP control plane room types, got %+v", result.ChatRooms)
 	}
 }
 

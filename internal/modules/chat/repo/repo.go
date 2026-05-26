@@ -150,7 +150,7 @@ func (r *MemoryRepository) GetCommandTargets(userID, tripID, targetType string) 
 	if !ok {
 		return nil, apperr.New(404, "Trip not found")
 	}
-	if !isTripActor(rental, userID) {
+	if !r.isTripActor(rental, userID) {
 		return nil, apperr.New(403, "Forbidden trip access")
 	}
 	switch targetType {
@@ -158,21 +158,23 @@ func (r *MemoryRepository) GetCommandTargets(userID, tripID, targetType string) 
 		if rental.DriverID == nil || *rental.DriverID == "" {
 			return []dto.CommandTarget{}, nil
 		}
-		u, _ := r.users.FindByID(*rental.DriverID)
+		targetID := r.driverTargetUserID(*rental.DriverID)
+		u, _ := r.users.FindByID(targetID)
 		label := "Driver"
 		if u.ID != "" {
 			label = fmt.Sprintf("Driver · %s", u.Name)
 		}
-		return []dto.CommandTarget{{ID: *rental.DriverID, Label: label, Type: "driver"}}, nil
+		return []dto.CommandTarget{{ID: targetID, Label: label, Type: "driver"}}, nil
 	case "bodyguard":
 		out := make([]dto.CommandTarget, 0, len(rental.BodyGuardIDs))
 		for i, id := range rental.BodyGuardIDs {
-			u, _ := r.users.FindByID(id)
+			targetID := r.bodyGuardTargetUserID(id)
+			u, _ := r.users.FindByID(targetID)
 			label := fmt.Sprintf("Bodyguard #%d", i+1)
 			if u.ID != "" {
 				label = fmt.Sprintf("Bodyguard #%d · %s", i+1, u.Name)
 			}
-			out = append(out, dto.CommandTarget{ID: id, Label: label, Type: "bodyguard", Index: i + 1})
+			out = append(out, dto.CommandTarget{ID: targetID, Label: label, Type: "bodyguard", Index: i + 1})
 		}
 		return out, nil
 	case "bodyguard-group":
@@ -316,7 +318,7 @@ func (r *MemoryRepository) resolveTarget(userID, tripID, targetType string, targ
 	if !ok {
 		return dto.CommandTarget{}, apperr.New(404, "Trip not found")
 	}
-	if !isTripActor(rental, userID) {
+	if !r.isTripActor(rental, userID) {
 		return dto.CommandTarget{}, apperr.New(403, "Forbidden trip access")
 	}
 	switch targetType {
@@ -324,7 +326,7 @@ func (r *MemoryRepository) resolveTarget(userID, tripID, targetType string, targ
 		if rental.DriverID == nil || *rental.DriverID == "" {
 			return dto.CommandTarget{}, apperr.New(404, "Driver is not assigned")
 		}
-		return dto.CommandTarget{ID: *rental.DriverID, Type: "driver", Label: "Driver"}, nil
+		return dto.CommandTarget{ID: r.driverTargetUserID(*rental.DriverID), Type: "driver", Label: "Driver"}, nil
 	case "bodyguard":
 		if bodyguardIndex != nil {
 			idx := *bodyguardIndex - 1
@@ -332,25 +334,29 @@ func (r *MemoryRepository) resolveTarget(userID, tripID, targetType string, targ
 				return dto.CommandTarget{}, apperr.New(400, "Invalid bodyguard index")
 			}
 			id := rental.BodyGuardIDs[idx]
-			return dto.CommandTarget{ID: id, Type: "bodyguard", Label: fmt.Sprintf("Bodyguard #%d", *bodyguardIndex), Index: *bodyguardIndex}, nil
+			return dto.CommandTarget{ID: r.bodyGuardTargetUserID(id), Type: "bodyguard", Label: fmt.Sprintf("Bodyguard #%d", *bodyguardIndex), Index: *bodyguardIndex}, nil
 		}
 		if len(targetIDs) == 0 {
 			return dto.CommandTarget{}, apperr.New(400, "bodyguard target requires bodyguardIndex or targetIds")
 		}
-		if !contains(rental.BodyGuardIDs, targetIDs[0]) {
+		resolvedID, ok := r.resolveBodyGuardTargetID(rental.BodyGuardIDs, targetIDs[0])
+		if !ok {
 			return dto.CommandTarget{}, apperr.New(400, "Target bodyguard not in trip")
 		}
-		return dto.CommandTarget{ID: targetIDs[0], Type: "bodyguard", Label: "Bodyguard"}, nil
+		return dto.CommandTarget{ID: resolvedID, Type: "bodyguard", Label: "Bodyguard"}, nil
 	case "bodyguard-group":
 		ids := []string{}
 		if len(targetIDs) == 0 {
-			ids = append(ids, rental.BodyGuardIDs...)
+			for _, id := range rental.BodyGuardIDs {
+				ids = append(ids, r.bodyGuardTargetUserID(id))
+			}
 		} else {
 			for _, id := range targetIDs {
-				if !contains(rental.BodyGuardIDs, id) {
+				resolvedID, ok := r.resolveBodyGuardTargetID(rental.BodyGuardIDs, id)
+				if !ok {
 					return dto.CommandTarget{}, apperr.New(400, "One or more bodyguards not in trip")
 				}
-				ids = append(ids, id)
+				ids = append(ids, resolvedID)
 			}
 		}
 		if len(ids) == 0 {
@@ -376,25 +382,57 @@ func (r *MemoryRepository) validateTargetedOpsPermission(userID, chatRoomID stri
 	if !ok {
 		return apperr.New(404, "Chat room not found")
 	}
-	if room.Type != "GROUP" {
+	if room.Type != "GROUP" && room.Type != "driver_ops" && room.Type != "bg_team" {
 		return apperr.New(403, "Driver/bodyguard targeted messages are only allowed in ops rooms")
 	}
 	return nil
 }
 
-func isTripActor(r model.Rental, userID string) bool {
-	if r.UserID == userID {
+func (r *MemoryRepository) isTripActor(rental model.Rental, userID string) bool {
+	if rental.UserID == userID {
 		return true
 	}
-	if r.DriverID != nil && *r.DriverID == userID {
-		return true
+	if rental.DriverID != nil {
+		if *rental.DriverID == userID || r.driverTargetUserID(*rental.DriverID) == userID {
+			return true
+		}
 	}
-	for _, id := range r.BodyGuardIDs {
-		if id == userID {
+	for _, id := range rental.BodyGuardIDs {
+		if id == userID || r.bodyGuardTargetUserID(id) == userID {
 			return true
 		}
 	}
 	return false
+}
+
+func (r *MemoryRepository) driverTargetUserID(profileID string) string {
+	r.store.Mu.RLock()
+	profile, ok := r.store.DriverProfiles[profileID]
+	r.store.Mu.RUnlock()
+	if ok && profile.UserID != "" {
+		return profile.UserID
+	}
+	return profileID
+}
+
+func (r *MemoryRepository) bodyGuardTargetUserID(profileID string) string {
+	r.store.Mu.RLock()
+	profile, ok := r.store.BodyGuardProfiles[profileID]
+	r.store.Mu.RUnlock()
+	if ok && profile.UserID != "" {
+		return profile.UserID
+	}
+	return profileID
+}
+
+func (r *MemoryRepository) resolveBodyGuardTargetID(profileIDs []string, candidate string) (string, bool) {
+	for _, profileID := range profileIDs {
+		targetID := r.bodyGuardTargetUserID(profileID)
+		if profileID == candidate || targetID == candidate {
+			return targetID, true
+		}
+	}
+	return "", false
 }
 
 func contains(v []string, id string) bool {

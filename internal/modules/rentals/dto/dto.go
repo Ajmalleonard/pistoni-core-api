@@ -38,6 +38,16 @@ type CreateRouteRentalsDTO struct {
 	Cars              []RouteCarSelectionDTO `json:"cars" binding:"required"`
 }
 
+type RouteChatRoomDTO struct {
+	ID             string   `json:"id"`
+	TripID         string   `json:"tripId"`
+	Key            string   `json:"key"`
+	Type           string   `json:"type"`
+	Status         string   `json:"status"`
+	Name           string   `json:"name"`
+	ParticipantIDs []string `json:"participantIds"`
+}
+
 type CalculateRentalPriceDTO struct {
 	StartDate    string   `json:"startDate" binding:"required"`
 	EndDate      string   `json:"endDate" binding:"required"`

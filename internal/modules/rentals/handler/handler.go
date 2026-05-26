@@ -31,11 +31,11 @@ func (h *Handler) create(c *gin.Context) {
 func (h *Handler) createRouteRentals(c *gin.Context) {
 	var in dto.CreateRouteRentalsDTO
 	bind(c, &in, func() (any, error) {
-		rentals, err := h.svc.CreateRouteRentals(in)
+		result, err := h.svc.CreateRouteRentals(in)
 		if err != nil {
 			return nil, err
 		}
-		return gin.H{"rentals": rentals, "totalPrice": in.TotalPrice}, nil
+		return gin.H{"rentals": result.Rentals, "chatRooms": result.ChatRooms, "totalPrice": in.TotalPrice}, nil
 	})
 }
 func (h *Handler) calculatePrice(c *gin.Context) {

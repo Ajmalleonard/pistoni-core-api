@@ -16,9 +16,14 @@ type Query struct {
 	UserID, Status string
 }
 
+type RouteRentalsResult struct {
+	Rentals   []model.Rental
+	ChatRooms []dto.RouteChatRoomDTO
+}
+
 type Repository interface {
 	Create(in dto.CreateRentalDTO) (model.Rental, error)
-	CreateRouteRentals(in dto.CreateRouteRentalsDTO) ([]model.Rental, error)
+	CreateRouteRentals(in dto.CreateRouteRentalsDTO) (RouteRentalsResult, error)
 	FindAll(q Query) ([]model.Rental, error)
 	FindOne(id string) (model.Rental, error)
 	Update(id string, patch map[string]any) (model.Rental, error)
@@ -90,20 +95,20 @@ func (r *MemoryRepository) Create(in dto.CreateRentalDTO) (model.Rental, error) 
 	return rent, nil
 }
 
-func (r *MemoryRepository) CreateRouteRentals(in dto.CreateRouteRentalsDTO) ([]model.Rental, error) {
+func (r *MemoryRepository) CreateRouteRentals(in dto.CreateRouteRentalsDTO) (RouteRentalsResult, error) {
 	sd, err := time.Parse(time.RFC3339, in.StartDate)
 	if err != nil {
-		return nil, apperr.New(400, "Invalid startDate")
+		return RouteRentalsResult{}, apperr.New(400, "Invalid startDate")
 	}
 	ed, err := time.Parse(time.RFC3339, in.EndDate)
 	if err != nil {
-		return nil, apperr.New(400, "Invalid endDate")
+		return RouteRentalsResult{}, apperr.New(400, "Invalid endDate")
 	}
 	if len(in.Cars) == 0 {
-		return nil, apperr.New(400, "At least one car must be selected")
+		return RouteRentalsResult{}, apperr.New(400, "At least one car must be selected")
 	}
 	if len(in.BodyGuardIDs) > 10 {
-		return nil, apperr.New(400, "A route can include up to 10 body guards")
+		return RouteRentalsResult{}, apperr.New(400, "A route can include up to 10 body guards")
 	}
 
 	status := model.RentalStatusPending
@@ -112,45 +117,45 @@ func (r *MemoryRepository) CreateRouteRentals(in dto.CreateRouteRentalsDTO) ([]m
 	}
 	bodyGuardIDs := uniqueStrings(in.BodyGuardIDs)
 	if len(bodyGuardIDs) != len(in.BodyGuardIDs) {
-		return nil, apperr.New(400, "Duplicate body guard selections are not allowed")
+		return RouteRentalsResult{}, apperr.New(400, "Duplicate body guard selections are not allowed")
 	}
 	securityRequired := in.SecurityRequired != nil && *in.SecurityRequired
 	if len(bodyGuardIDs) > 0 {
 		securityRequired = true
 	}
 	if securityRequired && len(bodyGuardIDs) == 0 {
-		return nil, apperr.New(400, "At least one body guard must be selected when security is required")
+		return RouteRentalsResult{}, apperr.New(400, "At least one body guard must be selected when security is required")
 	}
 
 	r.store.Mu.Lock()
 	defer r.store.Mu.Unlock()
 	if _, ok := r.store.Users[in.UserID]; !ok {
-		return nil, apperr.New(404, "User not found")
+		return RouteRentalsResult{}, apperr.New(404, "User not found")
 	}
 
 	seenCars := make(map[string]struct{}, len(in.Cars))
 	for _, selected := range in.Cars {
 		if selected.CarID == "" {
-			return nil, apperr.New(400, "carId is required")
+			return RouteRentalsResult{}, apperr.New(400, "carId is required")
 		}
 		if _, exists := seenCars[selected.CarID]; exists {
-			return nil, apperr.New(400, "Duplicate car selections are not allowed")
+			return RouteRentalsResult{}, apperr.New(400, "Duplicate car selections are not allowed")
 		}
 		seenCars[selected.CarID] = struct{}{}
 		if _, ok := r.store.Cars[selected.CarID]; !ok {
-			return nil, apperr.New(404, "Car not found")
+			return RouteRentalsResult{}, apperr.New(404, "Car not found")
 		}
 		if selected.DriverID != nil {
 			p, ok := r.store.DriverProfiles[*selected.DriverID]
 			if !ok || !p.IsAvailable {
-				return nil, apperr.New(400, "Driver not available")
+				return RouteRentalsResult{}, apperr.New(400, "Driver not available")
 			}
 		}
 	}
 	for _, id := range bodyGuardIDs {
 		p, ok := r.store.BodyGuardProfiles[id]
 		if !ok || !p.IsAvailable {
-			return nil, apperr.New(400, "One or more body guards not available")
+			return RouteRentalsResult{}, apperr.New(400, "One or more body guards not available")
 		}
 	}
 
@@ -160,6 +165,7 @@ func (r *MemoryRepository) CreateRouteRentals(in dto.CreateRouteRentalsDTO) ([]m
 		totalPerRental = in.TotalPrice / float64(len(in.Cars))
 	}
 	rentals := make([]model.Rental, 0, len(in.Cars))
+	chatRooms := make([]dto.RouteChatRoomDTO, 0, len(in.Cars)*3)
 	for _, selected := range in.Cars {
 		driverRequired := in.DriverRequired != nil && *in.DriverRequired
 		if selected.DriverID != nil {
@@ -186,8 +192,9 @@ func (r *MemoryRepository) CreateRouteRentals(in dto.CreateRouteRentalsDTO) ([]m
 		}
 		r.store.Rentals[rent.ID] = rent
 		rentals = append(rentals, rent)
+		chatRooms = append(chatRooms, r.createTripControlPlaneRoomsLocked(rent, now)...)
 	}
-	return rentals, nil
+	return RouteRentalsResult{Rentals: rentals, ChatRooms: chatRooms}, nil
 }
 
 func (r *MemoryRepository) FindAll(q Query) ([]model.Rental, error) {
@@ -368,4 +375,105 @@ func uniqueStrings(values []string) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+func (r *MemoryRepository) createTripControlPlaneRoomsLocked(rent model.Rental, now time.Time) []dto.RouteChatRoomDTO {
+	systemID := r.systemUserIDLocked()
+	rooms := make([]dto.RouteChatRoomDTO, 0, 3)
+
+	rooms = append(rooms, r.upsertTripRoomLocked(rent.ID, "client", "Client VIP", []string{rent.UserID, systemID}, now))
+
+	if rent.DriverID != nil {
+		if driverUserID := r.driverUserIDLocked(*rent.DriverID); driverUserID != "" {
+			rooms = append(rooms, r.upsertTripRoomLocked(rent.ID, "driver_ops", "Driver operations", []string{driverUserID, systemID}, now))
+		}
+	}
+
+	bodyGuardUserIDs := r.bodyGuardUserIDsLocked(rent.BodyGuardIDs)
+	if len(bodyGuardUserIDs) > 0 {
+		rooms = append(rooms, r.upsertTripRoomLocked(rent.ID, "bg_team", "Bodyguard team", append(bodyGuardUserIDs, systemID), now))
+	}
+
+	return rooms
+}
+
+func (r *MemoryRepository) upsertTripRoomLocked(tripID, roomType, name string, participantIDs []string, now time.Time) dto.RouteChatRoomDTO {
+	key := "trip:" + tripID + ":" + roomType
+	participants := uniqueStrings(participantIDs)
+	for _, existing := range r.store.ChatRooms {
+		if existing.Key != nil && *existing.Key == key {
+			return routeChatRoomDTO(existing)
+		}
+	}
+
+	roomName := name
+	status := "open"
+	room := model.ChatRoom{
+		ID:             uuid.NewString(),
+		Name:           &roomName,
+		Type:           roomType,
+		TripID:         &tripID,
+		Key:            &key,
+		Status:         status,
+		ParticipantIDs: participants,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	r.store.ChatRooms[room.ID] = room
+	return routeChatRoomDTO(room)
+}
+
+func routeChatRoomDTO(room model.ChatRoom) dto.RouteChatRoomDTO {
+	name := ""
+	if room.Name != nil {
+		name = *room.Name
+	}
+	tripID := ""
+	if room.TripID != nil {
+		tripID = *room.TripID
+	}
+	key := ""
+	if room.Key != nil {
+		key = *room.Key
+	}
+	status := room.Status
+	if status == "" {
+		status = "open"
+	}
+	return dto.RouteChatRoomDTO{
+		ID:             room.ID,
+		TripID:         tripID,
+		Key:            key,
+		Type:           room.Type,
+		Status:         status,
+		Name:           name,
+		ParticipantIDs: append([]string{}, room.ParticipantIDs...),
+	}
+}
+
+func (r *MemoryRepository) systemUserIDLocked() string {
+	for _, user := range r.store.Users {
+		if user.Role == model.UserRoleAdmin {
+			return user.ID
+		}
+	}
+	return "system"
+}
+
+func (r *MemoryRepository) driverUserIDLocked(profileID string) string {
+	profile, ok := r.store.DriverProfiles[profileID]
+	if !ok {
+		return ""
+	}
+	return profile.UserID
+}
+
+func (r *MemoryRepository) bodyGuardUserIDsLocked(profileIDs []string) []string {
+	out := make([]string, 0, len(profileIDs))
+	for _, id := range profileIDs {
+		if profile, ok := r.store.BodyGuardProfiles[id]; ok && profile.UserID != "" {
+			out = append(out, profile.UserID)
+		}
+	}
+	return uniqueStrings(out)
 }

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -62,7 +62,11 @@ func (g *Gateway) Path() string             { return g.path }
 
 func (g *Gateway) registerHandlers() {
 	g.sio.OnConnect("/", func(c socketio.Conn) error {
-		uid, err := g.resolveUserID(c.URL())
+		if err := g.validateOrigin(c.RemoteHeader().Get("Origin")); err != nil {
+			c.Emit("chat.error", map[string]any{"message": err.Error()})
+			return err
+		}
+		uid, err := g.resolveUserID(c)
 		if err != nil {
 			c.Emit("chat.error", map[string]any{"message": err.Error()})
 			return err
@@ -230,14 +234,18 @@ func (g *Gateway) emitErr(c socketClient, event string, err error) {
 	c.Emit("chat.error", map[string]any{"event": event, "message": err.Error()})
 }
 
-func (g *Gateway) resolveUserID(u url.URL) (string, error) {
+func (g *Gateway) resolveUserID(c socketio.Conn) (string, error) {
+	u := c.URL()
 	q := u.Query()
 	if uid := q.Get("userId"); uid != "" {
 		return uid, nil
 	}
-	token := q.Get("token")
+	token := bearerToken(c.RemoteHeader().Get("Authorization"))
 	if token == "" {
-		return "", errors.New("missing userId/token in handshake")
+		token = q.Get("token")
+	}
+	if token == "" {
+		return "", errors.New("missing bearer token in handshake")
 	}
 	if g.jwt == nil {
 		return "", errors.New("token auth is not configured")
@@ -250,6 +258,31 @@ func (g *Gateway) resolveUserID(u url.URL) (string, error) {
 		return "", errors.New("token missing subject")
 	}
 	return claims.Sub, nil
+}
+
+func (g *Gateway) validateOrigin(origin string) error {
+	if origin == "" {
+		return nil
+	}
+	allowed := map[string]struct{}{
+		"https://core.api.pistoni.io": {},
+		"https://pistoni.io":          {},
+		"https://www.pistoni.io":      {},
+		"http://localhost:3000":       {},
+		"http://localhost:3001":       {},
+	}
+	if _, ok := allowed[origin]; ok {
+		return nil
+	}
+	return fmt.Errorf("forbidden websocket origin: %s", origin)
+}
+
+func bearerToken(header string) string {
+	const prefix = "Bearer "
+	if strings.HasPrefix(header, prefix) {
+		return strings.TrimSpace(strings.TrimPrefix(header, prefix))
+	}
+	return ""
 }
 
 func (g *Gateway) resolveUserFromPayload(payload map[string]any) (string, error) {
